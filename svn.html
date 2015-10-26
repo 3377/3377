@@ -26,11 +26,426 @@
 <div id="md" style="display: none;">
 <!-- markdown -->
 
+系统环境：CentOS-6.3
+
+安装方式：yum install （源码安装容易产生版本兼容的问题）
+
+安装软件：系统自动下载SVN软件
+
+检查已安装版本
+
+代码如下:
+
+#检查是否安装了低版本的SVN
+[root@zck /]# rpm -qa subversion
+#卸载旧版本SVN
+[root@zck modules]# yum remove subversion
+安装SVN
+[root@zck modules]# yum install httpd httpd-devel subversion mod_dav_svn mod_auth_mysql
+确认已安装了svn模块
+[root@zck /]# cd /etc/httpd/modules
+[root@zck modules]# ls | grep svn
+mod_authz_svn.so
+mod_dav_svn.so
+
+ 
+
+验证安装
+
+检验已经安装的SVN版本信息
+[root@zck modules]# svnserve --version
+svnserve，版本 1.6.11 (r934486)
+编译于 Jun 23 2012，00:44:03
+
+版权所有 (C) 2000-2009 CollabNet。
+Subversion 是开放源代码软件，请参阅 http://subversion.tigris.org/ 站点。
+此产品包含由 CollabNet(http://www.Collab.Net/) 开发的软件。
+
+下列版本库后端(FS) 模块可用:
+* fs_base : 模块只能操作BDB版本库。
+* fs_fs : 模块与文本文件(FSFS)版本库一起工作。
+
+Cyrus SASL 认证可用。
+
+1.代码库创建
+
+SVN软件安装完成后还需要建立SVN库
+
+代码如下:
+
+[root@zck modules]# mkdir -p /opt/svn/repositories
+[root@zck modules]# svnadmin create /opt/svn/repositories
+ 
+
+执行上面的命令后，自动建立repositories库，查看/opt/svn/repositories 文件夹发现包含了conf, db,format,hooks, locks, README.txt等文件，说明一个SVN库已经建立。
+
+配置代码库
+
+进入上面生成的文件夹conf下，进行配置
+[root@zck modules]# cd /opt/svn/repositories/conf
+
+2.用户密码passwd配置
+
+ 
+
+复制代码
+代码如下:
+
+[root@zck password]# cd /opt/svn/repositories/conf
+[root@admin conf]# vi + passwd
+ 
+
+修改passwd为以下内容：
+
+复制代码
+代码如下:
+
+[users]
+# harry = harryssecret
+# sally = sallyssecret
+zhoulf = 123456  //等号左右注意有空格
+3.权限控制authz配置
+
+ 
+
+[root@admin conf]# vi + authz
+目的是设置哪些用户可以访问哪些目录，向authz文件追加以下内容：
+#设置[/]代表根目录下所有的资源
+[/]
+zhoulf=rw //用户名rw 表示用户的读写权限
+4.服务svnserve.conf配置
+
+[root@admin conf]# vi + svnserve.conf
+
+追加以下内容：
+
+复制代码
+代码如下:
+
+[general]  //注意加到此目录下
+#匿名访问的权限，可以是read,write,none,默认为read
+anon-access=none
+#使授权用户有写权限
+auth-access=write
+#密码数据库的路径
+password-db=passwd
+#访问控制文件
+authz-db=authz
+#认证命名空间，subversion会在认证提示里显示，并且作为凭证缓存的关键字
+realm=/opt/svn/repositories
+ 
+
+5.配置防火墙端口
+
+ 
+
+复制代码
+代码如下:
+
+[root@zck conf]# vi /etc/sysconfig/iptables
+添加以下内容：
+-A INPUT -m state --state NEW -m tcp -p tcp --dport 3690 -j ACCEPT
+保存后重启防火墙
+[root@zck conf]# service iptables restart
+tips:这里最好完全关闭防火墙，不然还是有问题
+
+ 
+
+重启后生效
+
+开启：chkconfig iptables on
+
+关闭：chkconfig iptables off
+
+即时生效，重启后失效
+
+开启：service iptables start
+
+关闭：service iptables stop
+
+6.svn同步配置
+
+先将hooks/post-commit下的模板复制下，再根据模板改
+
+vi  post-commit
+
+REPOS="$1"
+REV="$2"
+SVN_PATH=/usr/bin/svn
+WEB_PATH=/www/web/nbseio/public_html  //项目地址
+LOG_PATH=/tmp/svn_update.log
+echo "nnnnnn###############Start Commit "`date "+%Y-%m-%d %H:%M:%S"`'###############'>>LOG_PATH
+echo `whoami`,$REPOS,$REV >> $LOG_PATH
+$SVN_PATH update --username shengou --password card $WEB_PATH --no-auth-cache >> $LOG_PATH   //每次以此账户密码进行自动检入检出
+
+chown -R www:www $WEB_PATH
+mailer.py commit "$REPOS" "$REV" /path/to/mailer.conf
+
+配置好后执行 svn co svn://ip /www/web/public_html
+
+增加脚本执行权限
+
+chmod +x post-commit
+
+配置完成后记得先结束进程，再启动下
+
+[root@zck password]# killall svnserve //停止
+[root@zck password]# svnserve -d -r /opt/svn/repositories // 启动
+
+每次重启服务器后记得启动SVN
+
+ 或者加入自动启动序列
+
+chkconfig --list        #列出所有的系统服务
+chkconfig --add svnserve       #增加svnserve服务
+
+chkconfig svnserve on   #设定svnserve在各等级为on，“各等级”包括2、3、4、5等级
+
+ 
+
+启动SVN
+
+代码如下:
+
+svnserve -d -r /opt/svn/repositories
+查看SVN进程
+
+代码如下:
+
+[root@zck conf]# ps -ef|grep svn|grep -v grep
+root 12538 1 0 14:40 ? 00:00:00 svnserve -d -r /opt/svn/repositories
+检测SVN 端口
+
+代码如下:
+
+[root@zck conf]# netstat -ln |grep 3690
+tcp 0 0 0.0.0.0:3690 0.0.0.0:* LISTEN
+停止重启SVN
+
+代码如下:
+
+[root@zck password]# killall svnserve //停止
+[root@zck password]# svnserve -d -r /opt/svn/repositories // 启动
+ 
+
+测试
+SVN服务已经启动，使用客户端测试连接。
+客户端连接地址：svn://ip
+用户名/密码： test/123456
+测试创建文件夹等操作。
 <!-- markdown end -->
 </div>
 <div class="entry" id="main">
 <!-- content -->
+<p>系统环境：CentOS-6.3</p>
 
+<p>安装方式：yum install （源码安装容易产生版本兼容的问题）</p>
+
+<p>安装软件：系统自动下载SVN软件</p>
+
+<p>检查已安装版本</p>
+
+<p>代码如下:</p>
+
+<h1 id="svn">检查是否安装了低版本的SVN</h1>
+
+<p>[root@zck /]# rpm -qa subversion</p>
+
+<h1 id="svn">卸载旧版本SVN</h1>
+
+<p>[root@zck modules]# yum remove subversion
+安装SVN
+[root@zck modules]# yum install httpd httpd-devel subversion mod<em>dav</em>svn mod<em>auth</em>mysql
+确认已安装了svn模块
+[root@zck /]# cd /etc/httpd/modules
+[root@zck modules]# ls | grep svn
+mod<em>authz</em>svn.so
+mod<em>dav</em>svn.so</p>
+
+<p>验证安装</p>
+
+<p>检验已经安装的SVN版本信息
+[root@zck modules]# svnserve --version
+svnserve，版本 1.6.11 (r934486)
+编译于 Jun 23 2012，00:44:03</p>
+
+<p>版权所有 (C) 2000-2009 CollabNet。
+Subversion 是开放源代码软件，请参阅 http://subversion.tigris.org/ 站点。
+此产品包含由 CollabNet(http://www.Collab.Net/) 开发的软件。</p>
+
+<p>下列版本库后端(FS) 模块可用:
+* fs<em>base : 模块只能操作BDB版本库。
+* fs</em>fs : 模块与文本文件(FSFS)版本库一起工作。</p>
+
+<p>Cyrus SASL 认证可用。</p>
+
+<p>1.代码库创建</p>
+
+<p>SVN软件安装完成后还需要建立SVN库</p>
+
+<p>代码如下:</p>
+
+<p>[root@zck modules]# mkdir -p /opt/svn/repositories
+[root@zck modules]# svnadmin create /opt/svn/repositories</p>
+
+<p>执行上面的命令后，自动建立repositories库，查看/opt/svn/repositories 文件夹发现包含了conf, db,format,hooks, locks, README.txt等文件，说明一个SVN库已经建立。</p>
+
+<p>配置代码库</p>
+
+<p>进入上面生成的文件夹conf下，进行配置
+[root@zck modules]# cd /opt/svn/repositories/conf</p>
+
+<p>2.用户密码passwd配置</p>
+
+<p>复制代码
+代码如下:</p>
+
+<p>[root@zck password]# cd /opt/svn/repositories/conf
+[root@admin conf]# vi + passwd</p>
+
+<p>修改passwd为以下内容：</p>
+
+<p>复制代码
+代码如下:</p>
+
+<p>[users]</p>
+
+<h1 id="harryharryssecret">harry = harryssecret</h1>
+
+<h1 id="sallysallyssecret">sally = sallyssecret</h1>
+
+<p>zhoulf = 123456  //等号左右注意有空格
+3.权限控制authz配置</p>
+
+<p>[root@admin conf]# vi + authz
+目的是设置哪些用户可以访问哪些目录，向authz文件追加以下内容：</p>
+
+<h1 id="">设置[/]代表根目录下所有的资源</h1>
+
+<p>[/]
+zhoulf=rw //用户名rw 表示用户的读写权限
+4.服务svnserve.conf配置</p>
+
+<p>[root@admin conf]# vi + svnserve.conf</p>
+
+<p>追加以下内容：</p>
+
+<p>复制代码
+代码如下:</p>
+
+<p>[general]  //注意加到此目录下</p>
+
+<h1 id="readwritenoneread">匿名访问的权限，可以是read,write,none,默认为read</h1>
+
+<p>anon-access=none</p>
+
+<h1 id="">使授权用户有写权限</h1>
+
+<p>auth-access=write</p>
+
+<h1 id="">密码数据库的路径</h1>
+
+<p>password-db=passwd</p>
+
+<h1 id="">访问控制文件</h1>
+
+<p>authz-db=authz</p>
+
+<h1 id="subversion">认证命名空间，subversion会在认证提示里显示，并且作为凭证缓存的关键字</h1>
+
+<p>realm=/opt/svn/repositories</p>
+
+<p>5.配置防火墙端口</p>
+
+<p>复制代码
+代码如下:</p>
+
+<p>[root@zck conf]# vi /etc/sysconfig/iptables
+添加以下内容：
+-A INPUT -m state --state NEW -m tcp -p tcp --dport 3690 -j ACCEPT
+保存后重启防火墙
+[root@zck conf]# service iptables restart
+tips:这里最好完全关闭防火墙，不然还是有问题</p>
+
+<p>重启后生效</p>
+
+<p>开启：chkconfig iptables on</p>
+
+<p>关闭：chkconfig iptables off</p>
+
+<p>即时生效，重启后失效</p>
+
+<p>开启：service iptables start</p>
+
+<p>关闭：service iptables stop</p>
+
+<p>6.svn同步配置</p>
+
+<p>先将hooks/post-commit下的模板复制下，再根据模板改</p>
+
+<p>vi  post-commit</p>
+
+<p>REPOS="<span class="MathJax_Preview" style="color: inherit;"></span><span class="MathJax" id="MathJax-Element-25-Frame"><nobr><span class="math" id="MathJax-Span-337" role="math" style="display: inline-block; width: 6.199em;"><span style="display: inline-block; position: relative; width: 5.337em; height: 0px; font-size: 116%;"><span style="position: absolute; clip: rect(1.35em 1000em 2.373em -999.997em); top: -2.206em; left: 0.003em;"><span class="mrow" id="MathJax-Span-338" style="display: inline-block;"><span class="mn" id="MathJax-Span-339" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Main/Regular/400/0031.png?rev=2.5.3" style="width: 8px; height: 12px; margin-right: 0.057em;"></span><span class="mo" id="MathJax-Span-340" style="display: inline-block; padding-left: 0.272em;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Main/Regular/400/0022.png?rev=2.5.3" style="width: 7px; height: 6px; vertical-align: 7px; margin-right: 0.11em;"></span><span class="mi" id="MathJax-Span-341" style="display: inline-block; padding-left: 0.272em;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0052.png?rev=2.5.3" style="width: 14px; height: 13px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-342" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0045.png?rev=2.5.3" style="width: 14px; height: 13px; margin-right: 0.003em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span><span class="mi" id="MathJax-Span-343" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0056.png?rev=2.5.3" style="width: 14px; height: 14px; vertical-align: -1px; margin-right: -0.159em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.164em;"></span></span><span class="mo" id="MathJax-Span-344" style="display: inline-block; padding-left: 0.272em;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Main/Regular/400/003D.png?rev=2.5.3" style="width: 13px; height: 4px; vertical-align: 2px; margin-right: 0.057em;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Main/Regular/400/0022.png?rev=2.5.3" style="width: 7px; height: 6px; vertical-align: 7px; margin-right: 0.11em;"></span></span><span style="display: inline-block; width: 0px; height: 2.212em;"></span></span></span><span style="border-left-width: 0.003em; border-left-style: solid; display: inline-block; overflow: hidden; width: 0px; height: 0.941em; vertical-align: -0.059em;"></span></span></nobr></span><script type="math/tex" id="MathJax-Element-25">1"
+REV="</script>2"
+SVN<em>PATH=/usr/bin/svn
+WEB</em>PATH=/www/web/nbseio/public<em>html  //项目地址
+LOG</em>PATH=/tmp/svn<em>update.log
+echo "nnnnnn###############Start Commit "<code>date "+%Y-%m-%d %H:%M:%S"</code>'###############'&gt;&gt;LOG</em>PATH
+echo <code>whoami</code>,<span class="MathJax_Preview" style="color: inherit;"></span><span class="MathJax" id="MathJax-Element-26-Frame"><nobr><span class="math" id="MathJax-Span-345" role="math" style="display: inline-block; width: 4.636em;"><span style="display: inline-block; position: relative; width: 3.99em; height: 0px; font-size: 116%;"><span style="position: absolute; clip: rect(1.35em 1000em 2.589em -999.997em); top: -2.206em; left: 0.003em;"><span class="mrow" id="MathJax-Span-346" style="display: inline-block;"><span class="mi" id="MathJax-Span-347" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0052.png?rev=2.5.3" style="width: 14px; height: 13px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-348" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0045.png?rev=2.5.3" style="width: 14px; height: 13px; margin-right: 0.003em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span><span class="mi" id="MathJax-Span-349" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0050.png?rev=2.5.3" style="width: 14px; height: 13px; margin-right: -0.105em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.11em;"></span></span><span class="mi" id="MathJax-Span-350" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/004F.png?rev=2.5.3" style="width: 14px; height: 14px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-351" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0053.png?rev=2.5.3" style="width: 12px; height: 14px; vertical-align: 0px; margin-right: -0.051em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.057em;"></span></span><span class="mo" id="MathJax-Span-352" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Main/Regular/400/002C.png?rev=2.5.3" style="width: 4px; height: 6px; vertical-align: -4px; margin-right: 0.057em;"></span></span><span style="display: inline-block; width: 0px; height: 2.212em;"></span></span></span><span style="border-left-width: 0.003em; border-left-style: solid; display: inline-block; overflow: hidden; width: 0px; height: 1.191em; vertical-align: -0.309em;"></span></span></nobr></span><script type="math/tex" id="MathJax-Element-26">REPOS,</script>REV &gt;&gt; $LOG<em>PATH
+$SVN</em>PATH update --username shengou --password card $WEB<em>PATH --no-auth-cache &gt;&gt; $LOG</em>PATH   //每次以此账户密码进行自动检入检出</p>
+
+<p>chown -R www:www <span class="MathJax_Preview" style="color: inherit;"></span><span class="MathJax" id="MathJax-Element-27-Frame"><nobr><span class="math" id="MathJax-Span-353" role="math" style="display: inline-block; width: 16.436em;"><span style="display: inline-block; position: relative; width: 14.173em; height: 0px; font-size: 116%;"><span style="position: absolute; clip: rect(1.35em 1000em 2.589em -999.997em); top: -2.206em; left: 0.003em;"><span class="mrow" id="MathJax-Span-354" style="display: inline-block;"><span class="mi" id="MathJax-Span-355" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0057.png?rev=2.5.3" style="width: 19px; height: 14px; vertical-align: -1px; margin-right: -0.105em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.11em;"></span></span><span class="mi" id="MathJax-Span-356" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0045.png?rev=2.5.3" style="width: 14px; height: 13px; margin-right: 0.003em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span><span class="msubsup" id="MathJax-Span-357" style="display: inline-block;"><span style="display: inline-block; position: relative; width: 1.404em; height: 0px;"><span style="position: absolute; clip: rect(3.128em 1000em 4.151em -999.997em); top: -3.984em; left: 0.003em;"><span class="mi" id="MathJax-Span-358" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0042.png?rev=2.5.3" style="width: 14px; height: 13px; margin-right: 0.003em;"></span><span style="display: inline-block; width: 0px; height: 3.99em;"></span></span><span style="position: absolute; top: -3.823em; left: 0.757em;"><span class="mi" id="MathJax-Span-359" style="display: inline-block; font-size: 70.7%;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/283/0050.png?rev=2.5.3" style="width: 10px; height: 9px; margin-right: -0.105em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.057em;"></span></span><span style="display: inline-block; width: 0px; height: 3.99em;"></span></span></span></span><span class="mi" id="MathJax-Span-360" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0041.png?rev=2.5.3" style="width: 14px; height: 14px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-361" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0054.png?rev=2.5.3" style="width: 13px; height: 13px; margin-right: -0.105em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.11em;"></span></span><span class="mi" id="MathJax-Span-362" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0048.png?rev=2.5.3" style="width: 17px; height: 13px; margin-right: -0.051em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.057em;"></span></span><span class="mi" id="MathJax-Span-363" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/006D.png?rev=2.5.3" style="width: 16px; height: 9px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-364" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0061.png?rev=2.5.3" style="width: 9px; height: 9px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-365" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0069.png?rev=2.5.3" style="width: 6px; height: 13px; vertical-align: 0px; margin-right: 0.057em;"></span><span class="mi" id="MathJax-Span-366" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/006C.png?rev=2.5.3" style="width: 5px; height: 13px; vertical-align: 0px; margin-right: 0.057em;"></span><span class="mi" id="MathJax-Span-367" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0065.png?rev=2.5.3" style="width: 8px; height: 9px; vertical-align: 0px; margin-right: 0.057em;"></span><span class="mi" id="MathJax-Span-368" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0072.png?rev=2.5.3" style="width: 8px; height: 9px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mo" id="MathJax-Span-369" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Main/Regular/400/002E.png?rev=2.5.3" style="width: 4px; height: 2px; margin-right: 0.057em;"></span><span class="mi" id="MathJax-Span-370" style="display: inline-block; padding-left: 0.164em;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0070.png?rev=2.5.3" style="width: 10px; height: 12px; vertical-align: -4px; margin-left: -0.051em; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-371" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0079.png?rev=2.5.3" style="width: 9px; height: 12px; vertical-align: -4px; margin-right: 0.003em;"><span style="display: inline-block; overflow: hidden; height: 1px; width: 0.003em;"></span></span><span class="mi" id="MathJax-Span-372" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0063.png?rev=2.5.3" style="width: 8px; height: 9px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-373" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/006F.png?rev=2.5.3" style="width: 9px; height: 9px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-374" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/006D.png?rev=2.5.3" style="width: 16px; height: 9px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-375" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/006D.png?rev=2.5.3" style="width: 16px; height: 9px; vertical-align: 0px; margin-right: 0.003em;"></span><span class="mi" id="MathJax-Span-376" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0069.png?rev=2.5.3" style="width: 6px; height: 13px; vertical-align: 0px; margin-right: 0.057em;"></span><span class="mi" id="MathJax-Span-377" style="display: inline-block;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Math/Italic/400/0074.png?rev=2.5.3" style="width: 6px; height: 12px; vertical-align: 0px; margin-right: 0.057em;"></span><span class="mo" id="MathJax-Span-378" style="display: inline-block; padding-left: 0.272em;"><img src="http://cdn.mathjax.org/mathjax/latest/fonts/HTML-CSS/TeX/png/Main/Regular/400/0022.png?rev=2.5.3" style="width: 7px; height: 6px; vertical-align: 7px; margin-right: 0.11em;"></span></span><span style="display: inline-block; width: 0px; height: 2.212em;"></span></span></span><span style="border-left-width: 0.003em; border-left-style: solid; display: inline-block; overflow: hidden; width: 0px; height: 1.191em; vertical-align: -0.309em;"></span></span></nobr></span><script type="math/tex" id="MathJax-Element-27">WEB_PATH
+mailer.py commit "</script>REPOS" "$REV" /path/to/mailer.conf</p>
+
+<p>配置好后执行 svn co svn://ip /www/web/public_html</p>
+
+<p>增加脚本执行权限</p>
+
+<p>chmod +x post-commit</p>
+
+<p>配置完成后记得先结束进程，再启动下</p>
+
+<p>[root@zck password]# killall svnserve //停止
+[root@zck password]# svnserve -d -r /opt/svn/repositories // 启动</p>
+
+<p>每次重启服务器后记得启动SVN</p>
+
+<p>或者加入自动启动序列</p>
+
+<p>chkconfig --list        #列出所有的系统服务
+chkconfig --add svnserve       #增加svnserve服务</p>
+
+<p>chkconfig svnserve on   #设定svnserve在各等级为on，“各等级”包括2、3、4、5等级</p>
+
+<p>启动SVN</p>
+
+<p>代码如下:</p>
+
+<p>svnserve -d -r /opt/svn/repositories
+查看SVN进程</p>
+
+<p>代码如下:</p>
+
+<p>[root@zck conf]# ps -ef|grep svn|grep -v grep
+root 12538 1 0 14:40 ? 00:00:00 svnserve -d -r /opt/svn/repositories
+检测SVN 端口</p>
+
+<p>代码如下:</p>
+
+<p>[root@zck conf]# netstat -ln |grep 3690
+tcp 0 0 0.0.0.0:3690 0.0.0.0:* LISTEN
+停止重启SVN</p>
+
+<p>代码如下:</p>
+
+<p>[root@zck password]# killall svnserve //停止
+[root@zck password]# svnserve -d -r /opt/svn/repositories // 启动</p>
+
+<p>测试
+SVN服务已经启动，使用客户端测试连接。
+客户端连接地址：svn://ip
+用户名/密码： test/123456
+测试创建文件夹等操作。</p>
 <!-- content end -->
 </div>
 <br>
